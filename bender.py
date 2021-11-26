@@ -11,8 +11,6 @@ app = Flask(__name__)
 
 load_dotenv()
 
-MESSAGE_QUERY = "from:bender"
-MESSAGE_PAGE_SIZE = 100
 DEBUG = True
 STATE_SIZE = 2
 
@@ -54,26 +52,6 @@ def _store_db(obj):
 
     return True
 
-def _query_messages(client, page=1):
-    """
-    Convenience method for querying messages from Slack API.
-    """
-    if DEBUG:
-        print("requesting page {}".format(page))
-
-    return client.api_call('search.messages', query=MESSAGE_QUERY, count=MESSAGE_PAGE_SIZE, page=page)
-
-def _add_messages(message_db, new_messages):
-    """
-    Search through an API response and add all messages to the 'database' dictionary.
-    Returns updated dictionary.
-    """
-    for match in new_messages['messages']['matches']:
-        message_db[match['permalink']] = match['text']
-
-    return message_db
-
-
 # get all messages, build a giant text corpus
 def build_text_model(state_size=2):
     """
@@ -99,54 +77,6 @@ def format_message(original):
 
     return cleaned_message
 
-
-def update_corpus(sc, channel):
-    """
-    Queries for new messages and adds them to the 'database' object if new ones are found.
-    Reports back to the channel where the update was requested on status.
-    """
-
-    # Load the current database
-    messages_db = _load_db()
-    starting_count = len(messages_db.keys())
-
-    # Get first page of messages
-    new_messages = _query_messages(sc)
-    total_pages = new_messages['messages']['paging']['pages']
-
-    # store new messages
-    messages_db = _add_messages(messages_db, new_messages)
-
-    # If any subsequent pages are present, get those too
-    if total_pages > 1:
-        for page in range(2, total_pages + 1):
-            new_messages = _query_messages(sc, page=page)
-            messages_db = _add_messages(messages_db, new_messages)
-
-    # See if any new keys were added
-    final_count = len(messages_db.keys())
-    new_message_count = final_count - starting_count
-
-    # If the count went up, save the new 'database' to disk, report the stats.
-    if final_count > starting_count:
-        # Write to disk since there is new data.
-        _store_db(messages_db)
-        sc.rtm_send_message(channel, "I have been imbued with the power of {} new messages!".format(
-        new_message_count
-        ))
-
-    else:
-        sc.rtm_send_message(channel, "No new messages found :(")
-
-    if DEBUG:
-        print("Start: {}".format(starting_count), "Final: {}".format(final_count),
-        "New: {}".format(new_message_count))
-
-    # Make sure we close any sockets to the other group.
-    # del group_sc
-
-    return new_message_count
-    
 
 model = build_text_model()
 model_small = build_text_model(state_size=1) 
