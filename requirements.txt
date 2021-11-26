@@ -1,0 +1,24 @@
+certifi==2021.10.8
+charset-normalizer==2.0.8
+click==8.0.3
+Flask==2.0.2
+gunicorn==20.1.0
+idna==3.3
+importlib-metadata==4.8.2
+itsdangerous==2.0.1
+Jinja2==3.0.3
+markovify==0.9.3
+MarkupSafe==2.0.1
+megahal @ git+https://github.com/peileppe/megahal-035.git@c05d81fc1faa69ba090448a38d81db1bd4bec65d
+pkg_resources==0.0.0
+pyee==8.2.2
+python-dotenv==0.19.2
+python-Levenshtein==0.12.2
+requests==2.26.0
+slack-sdk==3.12.0
+slackeventsapi==3.0.0
+typing_extensions==4.0.0
+Unidecode==1.3.2
+urllib3==1.26.7
+Werkzeug==2.0.2
+zipp==3.6.0
