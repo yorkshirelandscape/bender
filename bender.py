@@ -6,6 +6,9 @@ import json
 import markovify
 import re
 from slack_sdk.web import WebClient
+import logging
+logging.basicConfig(filename='output.log', level=logging.DEBUG)
+import threading
 
 app = Flask(__name__)
 
@@ -23,6 +26,23 @@ slack_events_adapter = SlackEventAdapter(slack_signing_secret, "/", app)
 # Create a SlackClient for your bot to use for Web API requests
 slack_bot_token = os.environ["BENDER_TOKEN"]
 slack_client = WebClient(slack_bot_token)
+
+
+def setInterval(interval):
+    def decorator(function):
+        def wrapper(*args, **kwargs):
+            stopped = threading.Event()
+
+            def loop(): # executed in another thread
+                while not stopped.wait(interval): # until stopped
+                    function(*args, **kwargs)
+
+            t = threading.Thread(target=loop)
+            t.daemon = True # stop if the program exits
+            t.start()
+            return stopped
+        return wrapper
+    return decorator
 
 
 def _load_db():
@@ -59,7 +79,7 @@ def build_text_model(state_size=2):
     Returns TextModel.
     """
     if DEBUG:
-        print("Building new model...")
+        logging.info("Building new model...")
 
     messages = _load_db()
     return markovify.Text(" ".join(messages.values()), state_size)
@@ -80,23 +100,14 @@ def format_message(original):
 
 model = build_text_model()
 model_small = build_text_model(state_size=1) 
-print("Ready")
+logging.info("Ready")
 
 # import pdb; pdb.set_trace()
 # test = model_small.make_sentence(init_state=('president',))
 # print(test)
 
 new_messages = {}
-
-# Example responder to bot mentions
-@slack_events_adapter.on("app_mention")
-def handle_mentions(event_data):
-    event = event_data["event"]
-    slack_client.chat_postMessage(
-        channel=event["channel"],
-        text=f"You said:\n>{event['text']}",
-    )
-
+eIds = set()
 
 # Example responder to greetings
 @slack_events_adapter.on("message")
@@ -104,33 +115,26 @@ def handle_message(event_data):
     global model
     global model_small
     global new_messages
+    global eIds
+
+    eId = event_data["event_id"]
+    if eId in eIds:
+        logging.info(f"already seen message {eId}")
+        return
+    else:
+        eIds.add(eId)
 
     message = event_data["event"]
-    
-    if message.get("subtype") is None:
+
+    if message.get("subtype") is None and message.get("bot_id") is None:
         channel = message["channel"]
-        msgId = message.get('ts')
+        msgId = message.get("client_msg_id")
         text = re.sub('[^A-Za-z0-9 ]+', '', message.get('text').lower())
         newMsg = {msgId: text}
         new_messages.update(newMsg)
         
-        if text == "bender update":
-            if len(new_messages) > 0:
-                messages_db = _load_db()
-                messages_db.update(new_messages)
-                _store_db(messages_db)
-
-                new_messages = {}
-
-                model = build_text_model()
-                model_small = build_text_model(state_size=1)
-
-                message = "Brain updated."
-            else: message = "No updates to add." 
-
-            slack_client.chat_postMessage(channel=channel, text=message)
-        
-        elif "bender" in text:
+        if "bender" in text:
+            logging.info(text)
             channel = message["channel"]
             
             seed = tuple(list(reversed(sorted([w for w in text.split() if w != 'bender'], key=len)))[0:STATE_SIZE])
@@ -153,8 +157,26 @@ def handle_message(event_data):
 # Error events
 @slack_events_adapter.on("error")
 def error_handler(err):
-    print("ERROR: " + str(err))
+    logging.error(str(err))
 
+
+@setInterval(60*60)
+def update_brain():
+    global new_messages
+    global model
+    global model_small
+
+    messages_db = _load_db()
+    messages_db.update(new_messages)
+    _store_db(messages_db)
+
+    new_messages = {}
+
+    model = build_text_model()
+    model_small = build_text_model(state_size=1)
+
+
+stop = update_brain()
 
 
 # @app.route('/', methods=['POST'])
