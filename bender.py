@@ -15,7 +15,7 @@ app = Flask(__name__)
 load_dotenv()
 
 DEBUG = True
-STATE_SIZE = 2
+STATE_SIZE = 3
 
 PATH_TO_BRAIN = "/home/volfied/bender/message_db.json"
 
@@ -98,22 +98,37 @@ def format_message(original):
     return cleaned_message
 
 
-model = build_text_model()
-model_small = build_text_model(state_size=1) 
-logging.info("Ready")
+def rebuild_model(new_messages, model_max=STATE_SIZE):
+    messages_db = _load_db()
+    messages_db.update(new_messages)
+    _store_db(messages_db)
+
+    new_messages = {}
+
+    models = []
+    for i in range(model_max):
+        model = build_text_model(state_size=i+1)
+        models.append(model)
+        mj = model.to_json()
+        # with open(f'model_{i+1}.json', 'w') as json_file:
+        #     json_file.write(mj)
+        model.compile(inplace = True)
+
+    logging.info("Ready")
+    return models, new_messages
 
 # import pdb; pdb.set_trace()
 # test = model_small.make_sentence(init_state=('president',))
 # print(test)
 
 new_messages = {}
+models, new_messages = rebuild_model(new_messages)
 eIds = set()
 
 # Example responder to greetings
 @slack_events_adapter.on("message")
 def handle_message(event_data):
-    global model
-    global model_small
+    global models
     global new_messages
     global eIds
 
@@ -134,22 +149,22 @@ def handle_message(event_data):
         new_messages.update(newMsg)
         
         if "bender" in text:
-            logging.info(text)
             channel = message["channel"]
             
-            seed = tuple(list(reversed(sorted([w for w in text.split() if w != 'bender'], key=len)))[0:STATE_SIZE])
+            longest_word = list(reversed(sorted([w for w in text.split() if w != 'bender'], key=len)))[0]
+            words = list(text.split())
+            seed_len = min(len(words) - words.index(longest_word), STATE_SIZE)
+            seed = tuple(words[words.index(longest_word):words.index(longest_word) + seed_len])
             
-            try:
-                # print(seed)
-                markov_chain = model.make_sentence(init_state=seed)
-            except:
-                seed = (seed[0],)
-                # print(seed)
-                try:
-                    markov_chain = model_small.make_sentence(init_state=seed)
-                except:
-                    # print('None')
-                    markov_chain = model.make_sentence()
+            markov_chain = None
+            for model in models:
+                if markov_chain is None:
+                    try:                   
+                        markov_chain = model.make_sentence(init_state=seed)
+                    except:
+                        pass
+            if markov_chain is None:
+                markov_chain = models[STATE_SIZE-1].make_sentence()
             message = format_message(markov_chain)
             
             slack_client.chat_postMessage(channel=channel, text=message)
@@ -164,16 +179,7 @@ def error_handler(err):
 def update_brain():
     global new_messages
     global model
-    global model_small
-
-    messages_db = _load_db()
-    messages_db.update(new_messages)
-    _store_db(messages_db)
-
-    new_messages = {}
-
-    model = build_text_model()
-    model_small = build_text_model(state_size=1)
+    model, new_messages = rebuild_model(new_messages)
 
 
 stop = update_brain()
