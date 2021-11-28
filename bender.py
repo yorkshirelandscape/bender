@@ -9,6 +9,7 @@ from slack_sdk.web import WebClient
 import logging
 logging.basicConfig(filename='output.log', level=logging.DEBUG)
 import threading
+import subprocess
 
 app = Flask(__name__)
 
@@ -43,6 +44,12 @@ def setInterval(interval):
             return stopped
         return wrapper
     return decorator
+
+
+def tail(f, n, offset=0):
+    proc = subprocess.Popen(['tail', '-n', n + offset, f], stdout=subprocess.PIPE)
+    lines = proc.stdout.readlines()
+    return lines[:, -offset]
 
 
 def _load_db():
@@ -151,20 +158,46 @@ def handle_message(event_data):
         if "bender" in text:
             channel = message["channel"]
             
+            pad = STATE_SIZE - 1
             longest_word = list(reversed(sorted([w for w in text.split() if w != 'bender'], key=len)))[0]
-            words = list(text.split())
-            seed_len = min(len(words) - words.index(longest_word), STATE_SIZE)
-            seed = tuple(words[words.index(longest_word):words.index(longest_word) + seed_len])
+            words = list([w for w in text.split() if w != 'bender'])
+            lwi = words.index(longest_word)
+            lwip = lwi + 1
+            if lwi - pad >= 0:
+                seed = tuple(words[lwi - pad:lwip])
+                # logging.info('A')
+                # logging.info(seed)
+            elif len(words) - lwi >= STATE_SIZE:    
+                seed = tuple(words[lwi:lwip + pad])
+                # logging.info('B')
+                # logging.info(seed)
+            elif len(words) >= STATE_SIZE and pad % 2 == 0:
+                seed = tuple(words[lwi - int(pad / 2):lwip + int(pad / 2)])
+                # logging.info('C')
+                # logging.info(seed)
+            elif len(words) >= STATE_SIZE and pad % 2 != 0:
+                seed = tuple(words[lwi - int((pad - 1) / 2) - 1:lwip + int((pad - 1) / 2)])
+                # logging.info('D')
+                # logging.info(seed)
+            else:
+                seed = tuple(words[lwi - max(0,lwi - pad):lwip])
+                # logging.info('F')
+                # logging.info(seed)
             
             markov_chain = None
-            for model in models:
+            for i in range(pad, -1, -1):
+                # logging.info(i)
+                model = models[i]
                 if markov_chain is None:
-                    try:                   
+                    try:
+                        seed = seed[0:i+1]
+                        # logging.info(seed)
                         markov_chain = model.make_sentence(init_state=seed)
+                        # logging.info(f'{i} succeeded')
                     except:
                         pass
             if markov_chain is None:
-                markov_chain = models[STATE_SIZE-1].make_sentence()
+                markov_chain = models[pad].make_sentence()
             message = format_message(markov_chain)
             
             slack_client.chat_postMessage(channel=channel, text=message)
@@ -180,6 +213,10 @@ def update_brain():
     global new_messages
     global model
     model, new_messages = rebuild_model(new_messages)
+
+    trunc = tail('output.log', 100)
+    with open('output.log', 'w'):
+        trunc
 
 
 stop = update_brain()
