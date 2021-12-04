@@ -9,6 +9,7 @@ from slack_sdk.web import WebClient
 import logging
 logging.basicConfig(filename='output.log', level=logging.DEBUG)
 import threading
+from megahal import *
 
 app = Flask(__name__)
 
@@ -17,7 +18,9 @@ load_dotenv()
 DEBUG = True
 STATE_SIZE = 2
 
-PATH_TO_BRAIN = "/home/volfied/bender/message_db.json"
+megahal = MegaHAL()
+
+PATH_TO_BRAIN = "/home/volfied/dev_bender/megahal_brain_small"
 
 # Our app's Slack Event Adapter for receiving actions via the Events API
 slack_signing_secret = os.environ["SLACK_SIGNING_SECRET"]
@@ -45,79 +48,24 @@ def setInterval(interval):
     return decorator
 
 
-def _load_db():
-    """
-    Reads 'database' from a JSON file on disk.
-    Returns a dictionary keyed by unique message permalinks.
-    """
+megahal.train(PATH_TO_BRAIN)
 
-    try:
-        with open(PATH_TO_BRAIN, 'r') as json_file:
-            messages = json.loads(json_file.read())
-    except IOError:
-        with open(PATH_TO_BRAIN, 'w') as json_file:
-            json_file.write('{}')
-        messages = {}
-
-    return messages
-
-def _store_db(obj):
-    """
-    Takes a dictionary keyed by unique message permalinks and writes it to the JSON 'database' on
-    disk.
-    """
-
-    with open(PATH_TO_BRAIN, 'w') as json_file:
-        json_file.write(json.dumps(obj))
-
-    return True
-
-# get all messages, build a giant text corpus
-def build_text_model(state_size=2):
-    """
-    Read the latest 'database' off disk and build a new markov chain generator model.
-    Returns TextModel.
-    """
-    if DEBUG:
-        logging.info("Building new model...")
-
-    messages = _load_db()
-    return markovify.Text(" ".join(messages.values()), state_size)
-
-
-def format_message(original):
-    """
-    Do any formatting necessary to markov chains before relaying to Slack.
-    """
-    if original is None:
-        return
-
-    # Clear <> from urls
-    cleaned_message = re.sub(r'<(htt.*)>', '\1', original)
-
-    return cleaned_message
-
-
-model = build_text_model()
-model_small = build_text_model(state_size=1) 
-logging.info("Ready")
+# megahal.close()  # flush changes and close
 
 # import pdb; pdb.set_trace()
 # test = model_small.make_sentence(init_state=('president',))
 # print(test)
 
-new_messages = {}
-eIds = set()
+eIds = []
 
 # Example responder to greetings
 @slack_events_adapter.on("message")
 def handle_message(event_data):
-    global model
-    global model_small
     global new_messages
     global eIds
 
     eId = event_data["event_id"]
+    logging.info(eId)
     if eId in eIds:
         logging.info(f"already seen message {eId}")
         return
@@ -128,29 +76,13 @@ def handle_message(event_data):
 
     if message.get("subtype") is None and message.get("bot_id") is None:
         channel = message["channel"]
-        msgId = message.get("client_msg_id")
         text = re.sub('[^A-Za-z0-9 ]+', '', message.get('text').lower())
-        newMsg = {msgId: text}
-        new_messages.update(newMsg)
+        megahal.learn(text)        
         
         if "bender" in text:
             logging.info(text)
-            channel = message["channel"]
             
-            seed = tuple(list(reversed(sorted([w for w in text.split() if w != 'bender'], key=len)))[0:STATE_SIZE])
-            
-            try:
-                # print(seed)
-                markov_chain = model.make_sentence(init_state=seed)
-            except:
-                seed = (seed[0],)
-                # print(seed)
-                try:
-                    markov_chain = model_small.make_sentence(init_state=seed)
-                except:
-                    # print('None')
-                    markov_chain = model.make_sentence()
-            message = format_message(markov_chain)
+            message = megahal.get_reply(text)
             
             slack_client.chat_postMessage(channel=channel, text=message)
 
@@ -162,19 +94,7 @@ def error_handler(err):
 
 @setInterval(60*60)
 def update_brain():
-    global new_messages
-    global model
-    global model_small
-
-    messages_db = _load_db()
-    messages_db.update(new_messages)
-    _store_db(messages_db)
-
-    new_messages = {}
-
-    model = build_text_model()
-    model_small = build_text_model(state_size=1)
-
+    megahal.sync()
 
 stop = update_brain()
 
