@@ -11,6 +11,7 @@ import logging
 logging.basicConfig(filename='output.log', level=logging.INFO)
 import threading
 import subprocess
+from fuzzywuzzy import process
 
 app = Flask(__name__)
 
@@ -19,7 +20,7 @@ load_dotenv()
 DEBUG = True
 STATE_SIZE = 3
 
-PATH_TO_BRAIN = "/home/volfied/bender/message_db.json"
+PATH_TO_BRAIN = "/home/volfied/dev/message_db.json"
 
 # Our app's Slack Event Adapter for receiving actions via the Events API
 slack_signing_secret = os.environ["SLACK_SIGNING_SECRET"]
@@ -126,6 +127,9 @@ def rebuild_model(new_messages, model_max=STATE_SIZE):
     logging.info("Ready")
     return models, new_messages
 
+def tup_processor(tup):
+    ', '.join(tup)
+
 # import pdb; pdb.set_trace()
 # test = model_small.make_sentence(init_state=('president',))
 # print(test)
@@ -142,6 +146,7 @@ def handle_message(event_data):
     global eIds
 
     eId = event_data["event_id"]
+    logging.info(eId)
     if eId in eIds:
         logging.info(f"already seen message {eId}")
         return
@@ -192,40 +197,18 @@ def handle_message(event_data):
                 # logging.info('F')
                 # logging.info(seed)
             
-            markov_chain = None
-            for (i, k) in zip(range(STATE_SIZE, 0, -1), range(STATE_SIZE)):
-                # logging.info(f'{i},{k}')
-                model = models[i-1]
-                if markov_chain is None:
-                    try:
-                        if type_order == 'A':
-                            seed = seed[-i:]
-                            # logging.info(f'A: {seed}')
-                            markov_chain = model.make_sentence(init_state=seed)
-                        elif type_order == 'B':
-                            seed = seed[:i]
-                            # logging.info(f'B: {seed}')
-                            markov_chain = model.make_sentence(init_state=seed)
-                        elif type_order == 'C':
-                            seed = seed[0 + math.floor(k/2):STATE_SIZE - math.ceil(k/2)]
-                            # logging.info(f'C: {seed}')
-                            markov_chain = model.make_sentence(init_state=seed)
-                        elif type_order == 'D':
-                            seed = seed[0 + math.ceil(k/2):STATE_SIZE - math.floor(k/2)]
-                            # logging.info(f'D: {seed}')
-                            markov_chain = model.make_sentence(init_state=seed)
-                        else:
-                            seed = seed[:-i]
-                            # logging.info(f'F: {seed}')
-                            markov_chain = model.make_sentence(init_state=seed)
-                    except:
-                        pass
-            # logging.info(seed)
-            # logging.info(markov_chain)
-            # logging.info(f'{i} succeeded')
-                    
-            if markov_chain is None:
+            logging.info(seed)
+            str_seed = ', '.join(seed)
+            logging.info(str_seed)
+            match = process.extractOne(str_seed, models[pad].chain.model.keys(), processor=tup_processor)
+            seed = match[0]
+            
+            logging.info(match)
+            try:
+                markov_chain = models[pad].make_sentence(init_state=seed)
+            except:
                 markov_chain = models[pad].make_sentence()
+            
             message = format_message(markov_chain)
             # logging.info(message)
             
