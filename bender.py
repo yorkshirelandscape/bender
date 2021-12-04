@@ -2,14 +2,14 @@ from flask import Flask, Response
 from slackeventsapi import SlackEventAdapter
 from dotenv import load_dotenv
 import os
-import json
-import markovify
 import re
 from slack_sdk.web import WebClient
 import logging
 logging.basicConfig(filename='output.log', level=logging.DEBUG)
 import threading
 import subprocess
+
+from brain import Brain
 
 app = Flask(__name__)
 
@@ -18,8 +18,6 @@ load_dotenv()
 DEBUG = True
 STATE_SIZE = 3
 
-PATH_TO_BRAIN = "/home/volfied/bender/message_db.json"
-
 # Our app's Slack Event Adapter for receiving actions via the Events API
 slack_signing_secret = os.environ["SLACK_SIGNING_SECRET"]
 slack_events_adapter = SlackEventAdapter(slack_signing_secret, "/", app)
@@ -27,6 +25,8 @@ slack_events_adapter = SlackEventAdapter(slack_signing_secret, "/", app)
 # Create a SlackClient for your bot to use for Web API requests
 slack_bot_token = os.environ["BENDER_TOKEN"]
 slack_client = WebClient(slack_bot_token)
+
+brain = Brain("/home/volfied/bender/message_db.json")
 
 
 def setInterval(interval):
@@ -52,46 +52,6 @@ def tail(f, n, offset=0):
     return lines[:, -offset]
 
 
-def _load_db():
-    """
-    Reads 'database' from a JSON file on disk.
-    Returns a dictionary keyed by unique message permalinks.
-    """
-
-    try:
-        with open(PATH_TO_BRAIN, 'r') as json_file:
-            messages = json.loads(json_file.read())
-    except IOError:
-        with open(PATH_TO_BRAIN, 'w') as json_file:
-            json_file.write('{}')
-        messages = {}
-
-    return messages
-
-def _store_db(obj):
-    """
-    Takes a dictionary keyed by unique message permalinks and writes it to the JSON 'database' on
-    disk.
-    """
-
-    with open(PATH_TO_BRAIN, 'w') as json_file:
-        json_file.write(json.dumps(obj))
-
-    return True
-
-# get all messages, build a giant text corpus
-def build_text_model(state_size=2):
-    """
-    Read the latest 'database' off disk and build a new markov chain generator model.
-    Returns TextModel.
-    """
-    if DEBUG:
-        logging.info("Building new model...")
-
-    messages = _load_db()
-    return markovify.Text(" ".join(messages.values()), state_size)
-
-
 def format_message(original):
     """
     Do any formatting necessary to markov chains before relaying to Slack.
@@ -105,31 +65,8 @@ def format_message(original):
     return cleaned_message
 
 
-def rebuild_model(new_messages, model_max=STATE_SIZE):
-    messages_db = _load_db()
-    messages_db.update(new_messages)
-    _store_db(messages_db)
-
-    new_messages = {}
-
-    models = []
-    for i in range(model_max):
-        model = build_text_model(state_size=i+1)
-        models.append(model)
-        mj = model.to_json()
-        # with open(f'model_{i+1}.json', 'w') as json_file:
-        #     json_file.write(mj)
-        model.compile(inplace = True)
-
-    logging.info("Ready")
-    return models, new_messages
-
-# import pdb; pdb.set_trace()
-# test = model_small.make_sentence(init_state=('president',))
-# print(test)
-
 new_messages = {}
-models, new_messages = rebuild_model(new_messages)
+brain.learn_new_messages(new_messages)
 eIds = set()
 
 # Example responder to greetings
@@ -167,7 +104,7 @@ def handle_message(event_data):
                 seed = tuple(words[lwi - pad:lwip])
                 # logging.info('A')
                 # logging.info(seed)
-            elif len(words) - lwi >= STATE_SIZE:    
+            elif len(words) - lwi >= STATE_SIZE:
                 seed = tuple(words[lwi:lwip + pad])
                 # logging.info('B')
                 # logging.info(seed)
@@ -187,7 +124,7 @@ def handle_message(event_data):
             markov_chain = None
             for i in range(pad, -1, -1):
                 # logging.info(i)
-                model = models[i]
+                model = brain.models[i]
                 if markov_chain is None:
                     try:
                         seed = seed[0:i+1]
@@ -197,7 +134,7 @@ def handle_message(event_data):
                     except:
                         pass
             if markov_chain is None:
-                markov_chain = models[pad].make_sentence()
+                markov_chain = brain.models[pad].make_sentence()
             message = format_message(markov_chain)
             
             slack_client.chat_postMessage(channel=channel, text=message)
@@ -212,7 +149,7 @@ def error_handler(err):
 def update_brain():
     global new_messages
     global model
-    model, new_messages = rebuild_model(new_messages)
+    brain.learn_new_messages(new_messages)
 
     trunc = tail('output.log', 100)
     with open('output.log', 'w'):
