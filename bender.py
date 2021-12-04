@@ -5,9 +5,10 @@ import os
 import json
 import markovify
 import re
+import math
 from slack_sdk.web import WebClient
 import logging
-logging.basicConfig(filename='output.log', level=logging.DEBUG)
+logging.basicConfig(filename='output.log', level=logging.INFO)
 import threading
 import subprocess
 
@@ -114,6 +115,7 @@ def rebuild_model(new_messages, model_max=STATE_SIZE):
 
     models = []
     for i in range(model_max):
+        logging.info(i)
         model = build_text_model(state_size=i+1)
         models.append(model)
         mj = model.to_json()
@@ -163,42 +165,69 @@ def handle_message(event_data):
             words = list([w for w in text.split() if w != 'bender'])
             lwi = words.index(longest_word)
             lwip = lwi + 1
+            type_order = ''
             if lwi - pad >= 0:
                 seed = tuple(words[lwi - pad:lwip])
+                type_order = 'A'
                 # logging.info('A')
                 # logging.info(seed)
             elif len(words) - lwi >= STATE_SIZE:    
                 seed = tuple(words[lwi:lwip + pad])
+                type_order = 'B'
                 # logging.info('B')
                 # logging.info(seed)
             elif len(words) >= STATE_SIZE and pad % 2 == 0:
                 seed = tuple(words[lwi - int(pad / 2):lwip + int(pad / 2)])
+                type_order = 'C'
                 # logging.info('C')
                 # logging.info(seed)
             elif len(words) >= STATE_SIZE and pad % 2 != 0:
-                seed = tuple(words[lwi - int((pad - 1) / 2) - 1:lwip + int((pad - 1) / 2)])
+                seed = tuple(words[lwi - int(math.ceil(pad / 2)):lwip + int(math.floor(pad / 2))])
+                type_order = 'D'
                 # logging.info('D')
                 # logging.info(seed)
             else:
                 seed = tuple(words[lwi - max(0,lwi - pad):lwip])
+                type_order = 'F'
                 # logging.info('F')
                 # logging.info(seed)
             
             markov_chain = None
-            for i in range(pad, -1, -1):
-                # logging.info(i)
-                model = models[i]
+            for (i, k) in zip(range(STATE_SIZE, 0, -1), range(STATE_SIZE)):
+                # logging.info(f'{i},{k}')
+                model = models[i-1]
                 if markov_chain is None:
                     try:
-                        seed = seed[0:i+1]
-                        # logging.info(seed)
-                        markov_chain = model.make_sentence(init_state=seed)
-                        # logging.info(f'{i} succeeded')
+                        if type_order == 'A':
+                            seed = seed[-i:]
+                            # logging.info(f'A: {seed}')
+                            markov_chain = model.make_sentence(init_state=seed)
+                        elif type_order == 'B':
+                            seed = seed[:i]
+                            # logging.info(f'B: {seed}')
+                            markov_chain = model.make_sentence(init_state=seed)
+                        elif type_order == 'C':
+                            seed = seed[0 + math.floor(k/2):STATE_SIZE - math.ceil(k/2)]
+                            # logging.info(f'C: {seed}')
+                            markov_chain = model.make_sentence(init_state=seed)
+                        elif type_order == 'D':
+                            seed = seed[0 + math.ceil(k/2):STATE_SIZE - math.floor(k/2)]
+                            # logging.info(f'D: {seed}')
+                            markov_chain = model.make_sentence(init_state=seed)
+                        else:
+                            seed = seed[:-i]
+                            # logging.info(f'F: {seed}')
+                            markov_chain = model.make_sentence(init_state=seed)
                     except:
                         pass
+            # logging.info(seed)
+            # logging.info(markov_chain)
+            # logging.info(f'{i} succeeded')
+                    
             if markov_chain is None:
                 markov_chain = models[pad].make_sentence()
             message = format_message(markov_chain)
+            # logging.info(message)
             
             slack_client.chat_postMessage(channel=channel, text=message)
 
