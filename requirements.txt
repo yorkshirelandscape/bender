@@ -1,7 +1,6 @@
 click==8.0.3
 Flask==2.0.2
 fuzzywuzzy==0.18.0
-gunicorn==20.1.0
 importlib-metadata==4.8.2
 itsdangerous==2.0.1
 Jinja2==3.0.3
@@ -10,9 +9,8 @@ MarkupSafe==2.0.1
 pkg-resources==0.0.0
 pyee==8.2.2
 python-dotenv==0.19.2
-python-Levenshtein==0.12.2
-slack-sdk==3.12.0
-slackeventsapi==3.0.0
+slack-sdk==3.13.0
+slackeventsapi==3.0.1
 typing-extensions==4.0.1
 Unidecode==1.3.2
 Werkzeug==2.0.2

@@ -133,3 +133,6 @@ dmypy.json
 message_db.json
 *.sock
 *~
+corpus.brn
+model.json
+test.py

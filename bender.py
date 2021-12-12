@@ -2,7 +2,6 @@ from flask import Flask, Response
 from slackeventsapi import SlackEventAdapter
 from dotenv import load_dotenv
 import os
-import json
 import markovify
 import re
 import math
@@ -17,10 +16,7 @@ app = Flask(__name__)
 
 load_dotenv()
 
-DEBUG = True
 STATE_SIZE = 3
-
-PATH_TO_BRAIN = "/home/volfied/dev/message_db.json"
 
 # Our app's Slack Event Adapter for receiving actions via the Events API
 slack_signing_secret = os.environ["SLACK_SIGNING_SECRET"]
@@ -53,80 +49,6 @@ def tail(f, n, offset=0):
     lines = proc.stdout.readlines()
     return lines[:, -offset]
 
-
-def _load_db():
-    """
-    Reads 'database' from a JSON file on disk.
-    Returns a dictionary keyed by unique message permalinks.
-    """
-
-    try:
-        with open(PATH_TO_BRAIN, 'r') as json_file:
-            messages = json.loads(json_file.read())
-    except IOError:
-        with open(PATH_TO_BRAIN, 'w') as json_file:
-            json_file.write('{}')
-        messages = {}
-
-    return messages
-
-def _store_db(obj):
-    """
-    Takes a dictionary keyed by unique message permalinks and writes it to the JSON 'database' on
-    disk.
-    """
-
-    with open(PATH_TO_BRAIN, 'w') as json_file:
-        json_file.write(json.dumps(obj))
-
-    return True
-
-# get all messages, build a giant text corpus
-def build_text_model(state_size=2):
-    """
-    Read the latest 'database' off disk and build a new markov chain generator model.
-    Returns TextModel.
-    """
-    if DEBUG:
-        logging.info("Building new model...")
-
-    messages = _load_db()
-    return markovify.Text(" ".join(messages.values()), state_size)
-
-
-def format_message(original):
-    """
-    Do any formatting necessary to markov chains before relaying to Slack.
-    """
-    if original is None:
-        return
-
-    # Clear <> from urls
-    cleaned_message = re.sub(r'<(htt.*)>', '\1', original)
-
-    return cleaned_message
-
-
-def rebuild_model(new_messages, model_max=STATE_SIZE):
-    messages_db = _load_db()
-    messages_db.update(new_messages)
-    _store_db(messages_db)
-
-    new_messages = {}
-
-    models = []
-    for i in range(model_max):
-        logging.info(i)
-        model = build_text_model(state_size=i+1)
-        models.append(model)
-        mj = model.to_json()
-        # with open(f'model_{i+1}.json', 'w') as json_file:
-        #     json_file.write(mj)
-        model.compile(inplace = True)
-
-    logging.info("Ready")
-    return models, new_messages
-
 def tup_processor(tup):
     ', '.join(tup)
 
@@ -134,14 +56,28 @@ def tup_processor(tup):
 # test = model_small.make_sentence(init_state=('president',))
 # print(test)
 
-new_messages = {}
-models, new_messages = rebuild_model(new_messages)
+try:
+    logging.info('Attempting to load stored brain.')
+    with open('model.json', 'r') as model_json:
+        model = markovify.Text.from_json(model_json.read())
+except:
+    logging.info('Load failed. Rebuilding brain.')
+    with open('corpus.brn', 'r') as corpus:
+        model = markovify.Text(corpus.read(), state_size=STATE_SIZE)
+        mj = model.to_json()
+        with open('model.json', 'w') as file:
+            file.write(mj)
+
+model.compile(inplace = True)
+logging.info('Ready.')
+
 eIds = set()
+new_messages = []
 
 # Example responder to greetings
 @slack_events_adapter.on("message")
 def handle_message(event_data):
-    global models
+    global model
     global new_messages
     global eIds
 
@@ -158,9 +94,9 @@ def handle_message(event_data):
     if message.get("subtype") is None and message.get("bot_id") is None:
         channel = message["channel"]
         msgId = message.get("client_msg_id")
-        text = re.sub('[^A-Za-z0-9 ]+', '', message.get('text').lower())
-        newMsg = {msgId: text}
-        new_messages.update(newMsg)
+        text = message.get('text')
+        new_messages.append(text)
+        text = re.sub('[^A-Za-z0-9 ]+', '', text.lower())
         
         if "bender" in text:
             channel = message["channel"]
@@ -200,17 +136,18 @@ def handle_message(event_data):
             logging.info(seed)
             str_seed = ', '.join(seed)
             logging.info(str_seed)
-            match = process.extractOne(str_seed, models[pad].chain.model.keys(), processor=tup_processor)
+            seed_keys = list(k for k in model.chain.model.keys() if all(x in k for x in seed))
+            logging.info(seed_keys)
+            match = process.extractOne(str_seed, seed_keys, processor=tup_processor)
             seed = match[0]
             
             logging.info(match)
             try:
-                markov_chain = models[pad].make_sentence(init_state=seed)
+                message = model.make_sentence(init_state=seed)
             except:
-                markov_chain = models[pad].make_sentence()
+                message = model.make_sentence()
             
-            message = format_message(markov_chain)
-            # logging.info(message)
+            logging.info(message)
             
             slack_client.chat_postMessage(channel=channel, text=message)
 
@@ -224,11 +161,28 @@ def error_handler(err):
 def update_brain():
     global new_messages
     global model
-    model, new_messages = rebuild_model(new_messages)
+    
+    logging.info('Updating brain.')
+    with open('corpus.brn', 'a+') as corpus:
+        for line in new_messages:
+            corpus.write('\n')
+            corpus.write(line)
+        
+        model = markovify.Text(corpus.read(), state_size=STATE_SIZE)
+        corpus.close()
+
+    mj = model.to_json()
+    with open('model.json', 'w') as file:
+        file.write(mj)
+        file.close()
+
+    model.compile(inplace = True)
+    logging.info('Ready.')
 
     trunc = tail('output.log', 100)
-    with open('output.log', 'w'):
-        trunc
+    with open('output.log', 'w') as log:
+        log.write(trunc)
+        log.close()
 
 
 stop = update_brain()
