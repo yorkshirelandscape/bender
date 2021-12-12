@@ -132,6 +132,49 @@ def handle_message(event_data):
                 type_order = 'F'
                 # logging.info('F')
                 # logging.info(seed)
+
+            logging.info(seed)
+            str_seed = ', '.join(seed)
+            logging.info(str_seed)
+            seed_keys = list(k for k in model.chain.model.keys() if all(x in k for x in seed))
+            logging.info(seed_keys)
+            match = process.extractOne(str_seed, seed_keys, processor=tup_processor)
+            seed = match[0]
+            
+            message = None
+            for (i, k) in zip(range(STATE_SIZE, 0, -1), range(STATE_SIZE)):
+                if message is None:
+                    try:
+                        if type_order == 'A':
+                            seed = seed[-i:]
+                            # logging.info(f'A: {seed}')
+                            message = model.make_sentence(init_state=seed)
+                        elif type_order == 'B':
+                            seed = seed[:i]
+                            # logging.info(f'B: {seed}')
+                            message = model.make_sentence(init_state=seed)
+                        elif type_order == 'C':
+                            seed = seed[0 + math.floor(k/2):STATE_SIZE - math.ceil(k/2)]
+                            # logging.info(f'C: {seed}')
+                            message = model.make_sentence(init_state=seed)
+                        elif type_order == 'D':
+                            seed = seed[0 + math.ceil(k/2):STATE_SIZE - math.floor(k/2)]
+                            # logging.info(f'D: {seed}')
+                            message = model.make_sentence(init_state=seed)
+                        else:
+                            seed = seed[:-i]
+                            # logging.info(f'F: {seed}')
+                            message = model.make_sentence(init_state=seed)
+                    except:
+                        pass
+                logging.info(seed)
+                logging.info(message)
+                logging.info(f'{i} succeeded')
+                    
+            if message is None:
+                message = model.make_sentence()
+            logging.info(message)
+
             
             logging.info(seed)
             str_seed = ', '.join(seed)
