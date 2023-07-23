@@ -134,4 +134,5 @@ message_db.json
 *.sock
 *~
 brain_seed
-cobe.brain*
+bender.brain*
+.env
