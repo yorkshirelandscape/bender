@@ -75,10 +75,9 @@ def start_with_trigger_words(string):
 def message_learn(message, say):
 	msg = message['text']
 	bender.learn(msg)
-	if 'bender' in msg:
+	if 'bender' in msg.lower():
 		reply = bender.reply(msg)
     	# say() sends a message to the channel where the event was triggered
-		reply = reply[1:-1]
 		say(reply)
 
 

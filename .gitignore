@@ -133,6 +133,6 @@ dmypy.json
 message_db.json
 *.sock
 *~
-brain_seed
+brain_seed*
 bender.brain*
 .env

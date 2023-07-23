@@ -1,1 +1,10 @@
-/etc/systemd/system/bender.service
+[Unit]
+Description=Bender Bending Rodriguez
+
+[Service]
+User=volfied
+WorkingDirectory=/home/volfied/bender/
+ExecStart=/home/volfied/bender/.venv/bin/python3 /home/volfied/bender/bender.py
+
+[Install]
+WantedBy=multi-user.target
