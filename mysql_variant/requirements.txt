@@ -1,3 +1,0 @@
-cobe==3.0.1
-MySQL-python==1.2.5
-python-dotenv==1.0.0
