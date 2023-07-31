@@ -1,10 +1,13 @@
 import os
 import time
+import logging
 from random import randint
 from slack_bolt import App
 from slack_bolt.adapter.socket_mode import SocketModeHandler
 from cobe.brain import Brain
 from dotenv import load_dotenv
+
+# logging.basicConfig(filename='bender.log', filemode='w', level=logging.DEBUG)
 
 load_dotenv()
 
@@ -15,7 +18,7 @@ settings["APP_TOKEN"]			  = os.getenv("SLACK_APP_TOKEN")
 settings["CREATOR_ID"]            = os.getenv("CREATOR_ID")
 settings["CREATOR_NICKNAME"]      = os.getenv("CREATOR_NICKNAME")
 settings["TRIGGER_ENABLED"]       = bool(os.getenv("TRIGGER_ENABLED"))
-settings["TRIGGER_WORDS"]         = os.getenv("TRIGGER_WORDS").split(",")
+settings["TRIGGER_WORDS"]         = [x.lower() for x in os.getenv("TRIGGER_WORDS").split(",")]
 settings["CHAT_ALLOWLIST"]        = os.getenv("CHAT_ALLOWLIST").split(",")
 settings["RANDOM_ENABLED"]        = bool(os.getenv("RANDOM_ENABLED"))
 settings["RANDOM_RATIO"]          = os.getenv("RANDOM_RATIO")
@@ -43,17 +46,27 @@ def start_with_trigger_words(string):
 			return string[:len(word)]
 	return None
 
+@app.event('app_mention')
+def on_event(event, say):
+	msg = event['text']
+	if settings["LEARN_ENABLED"]:
+		bender.learn(remove_trigger_words(msg))
+	reply = bender.reply(msg)
+	# say() sends a message to the channel where the event was triggered
+	say(reply)
+
 # To learn available listener arguments,
 # visit https://slack.dev/bolt-python/api-docs/slack_bolt/kwargs_injection/args.html
 @app.message('.*')
-def message_learn(message, say):
+def on_event(message, say):
 	msg = message['text']
 	if settings["LEARN_ENABLED"]:
-	    bender.learn(remove_trigger_words(msg))
-	if 'bender' in msg.lower() or (settings["RANDOM_ENABLED"] and randint(0, settings["RANDOM_RATIO"])==0):
+		bender.learn(remove_trigger_words(msg))
+	if any(w in msg.lower() for w in settings["TRIGGER_WORDS"]) or (settings["RANDOM_ENABLED"] and randint(0, int(settings["RANDOM_RATIO"]))==0):
 		reply = bender.reply(msg)
     	# say() sends a message to the channel where the event was triggered
 		say(reply)
+
 
 # Start your app
 if __name__ == "__main__":

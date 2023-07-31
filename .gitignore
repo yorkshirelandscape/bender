@@ -136,3 +136,5 @@ message_db.json
 brain_seed*
 bender.brain*
 .env
+.vscode/
+seeds/
