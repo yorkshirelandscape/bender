@@ -1,13 +1,10 @@
 import os
-import time
-import logging
 from random import randint
 from slack_bolt import App
 from slack_bolt.adapter.socket_mode import SocketModeHandler
 from cobe.brain import Brain
 from dotenv import load_dotenv
-
-# logging.basicConfig(filename='bender.log', filemode='w', level=logging.DEBUG)
+from xkcd.reply import reply as xkcd
 
 load_dotenv()
 
@@ -54,6 +51,14 @@ def on_event(event, say):
 	reply = bender.reply(msg)
 	# say() sends a message to the channel where the event was triggered
 	say(reply)
+
+
+@app.message('xkcd')
+def on_event(message, say):
+	msg = message['text'].replace('xkcd', '')
+	reply = xkcd(msg)
+	say(reply)
+
 
 # To learn available listener arguments,
 # visit https://slack.dev/bolt-python/api-docs/slack_bolt/kwargs_injection/args.html

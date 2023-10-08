@@ -1,0 +1,10 @@
+[Unit]
+Description=xkcdaemon
+
+[Service]
+User=volfied
+WorkingDirectory=/home/volfied/bender/
+ExecStart=/home/volfied/bender/.venv/bin/python3 /home/volfied/bender/xkcd/daemon.py
+
+[Install]
+WantedBy=multi-user.target
